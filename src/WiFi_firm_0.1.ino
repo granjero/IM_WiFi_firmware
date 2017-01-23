@@ -57,79 +57,16 @@ void loop()
      client.println("Connection: close");
      // imprime el request http
      Serial.println(GET);
+     // imprime la respuesta del servidor
      while (client.available())
      {
        Serial.write(client.read());
      }
     }
-
     else
     {
     // if you couldn't make a connection:
     Serial.println("connection failed");
     }
-
-
-  }
-  /*
-  //leeSerial();
-  if (stringComplete)
-  {
-    //string del request http
-    String GET = "GET http://www.indoormatic.com.ar/test.php?debug=";
-    GET += inputString;
-    //GET += " HTTP/1.1 \n";
-
-    if (client.connect(server, 80))
-    {
-      Serial.println("connecting...");
-      // envia el request http
-     client.println(GET);
-     // cierra la conexion
-     client.println("Connection: close");
-     // imprime el request http
-     Serial.print(GET);
-     while (client.available())
-     {
-       Serial.write(client.read());
-     }
-    }
-
-    else
-    {
-    // if you couldn't make a connection:
-    Serial.println("connection failed");
-    }
-
-    // clear the string:
-    inputString = "";
-    stringComplete = false;
-
-  }
-  */
-}
-
-/*
-void leeSerial()
-{
-  delay(10);
-  while (Serial.available() > 0) {
-    if (inChar == '<')
-    {
-      leeDatoSerial = true;
-    }
-    if (leeDatoSerial)
-    {
-      inChar = (char)Serial.read();
-      // add it to the inputString:
-      inputString += inChar;
-    }
-    if (inChar == '>')
-    {
-      leeDatoSerial = false;
-      stringComplete = true;
-      return;
-    }
   }
 }
-*/
