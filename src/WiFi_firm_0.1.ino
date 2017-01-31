@@ -9,6 +9,7 @@ String GET      = "";// a string to hold incoming data
 String inputString = "";
 boolean stringComplete  = false;  // whether the string is complete
 boolean datoRecibido    = false;  // cuando es verdadero lee el dato de serie
+
 // Inicializa la libreria Wifi client
 WiFiClient client;
 
@@ -21,7 +22,7 @@ void setup()
     //wifiManager.resetSettings(); //reset saved settings
     wifiManager.autoConnect("IndoorMatic");
     //if you get here you have connected to the WiFi
-    Serial.println("CONECTADO_OK");
+    Serial.println("CONECTADO_WiFi");
 }
 
 void loop()
@@ -92,10 +93,24 @@ String analizaComando(String comando)
   {
     datoRecibido = true;
     comando = comando.substring( 1, comando.length() - 1) ;
-    comandoAnalizado = "GET http://www.indoormatic.com.ar/test.php?debug=";
+    comandoAnalizado = "GET http://www.indoormatic.com.ar/im/im.php";
     comandoAnalizado += comando;
     return comandoAnalizado;
   }
+
+  if( comando.startsWith( "[" ) && comando.endsWith( "]" ) )
+  {
+    comando = comando.substring( 1, comando.length() - 1) ;
+    if (comando.equals("ESP_status"))
+    {
+      if (WiFi.status())
+      {
+        Serial.println("CONECTADO_OK");
+      }
+
+    }
+  }
+
   else
   {
     datoRecibido = false;
