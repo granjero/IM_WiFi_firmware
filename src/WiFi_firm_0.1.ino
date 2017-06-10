@@ -8,6 +8,7 @@ char servidor[] = "www.indoormatic.com.ar";
 int debug = 0;
 String GET      = "";// a string to hold incoming data
 String stringDelSerial = "";
+String mac = "";
 boolean stringCompleta  = false;  // whether the string is complete
 
 // Inicializa la libreria Wifi client
@@ -17,9 +18,11 @@ void setup()
 {
     // put your setup code here, to run once:
     Serial.begin(115200);
+
     //WiFi.begin();
     //WiFiManager - Local intialization. Once its business is done, there is no need to keep it around
     WiFiManager wifiManager;
+    mac = WiFi.macAddress();
     //wifiManager.resetSettings(); //reset saved settings
     wifiManager.autoConnect("IndoorMatic");
     //if you get here you have connected to the WiFi
@@ -98,6 +101,8 @@ void analizaComando(String comando)
     //datoRecibido = true;
     comando = comando.substring( 1, comando.length() - 1);
     GET = "GET http://www.indoormatic.com.ar/im/im.php";
+    GET += "?1a1dc91c907325c69271ddf0c944bc72&disp=";
+    GET += mac;
     GET += comando;
     conexionServidor(servidor, GET);
   }
@@ -123,11 +128,16 @@ void analizaComando(String comando)
         Serial.print("MacAddress: ");
         Serial.print(WiFi.macAddress());
     }
+
+    if (comando.equals("[ESP_reset]"))
+    {
+        ESP.reset();
+    }
   }
 
   else
   {
     Serial.print("comando_error");
-    ESP.reset();
+    //ESP.reset();
   }
 }
