@@ -1,3 +1,10 @@
+/*********************************
+*                                *
+* Firmware del Indoor MATIC V0.1 *
+*                                *
+*********************************/
+
+/* L I B R E R I A S */
 #include <ESP8266WiFi.h>          //https://github.com/esp8266/Arduino
 //needed for library
 #include <DNSServer.h>
@@ -5,38 +12,36 @@
 #include <WiFiManager.h>         //https://github.com/tzapu/WiFiManager
 
 char servidor[] = "www.indoormatic.com.ar";
-int debug = 0;
-String GET      = "";// a string to hold incoming data
-String stringDelSerial = "";
-String mac = "";
-boolean stringCompleta  = false;  // whether the string is complete
 
-// Inicializa la libreria Wifi client
+/* V A R I A B L E S */
+//int debug = 0;
+String GET              = "";     //
+String stringDelSerial  = "";     // string que recibe lo que viene por el puerto serial
+String macAddress = "";
+
+boolean stringCompleta  = false;  // será true cuando llegue un comando por serial
+
+/* I N I C I A L I Z A libreria WiFi*/
 WiFiClient client;
 
+/* S E T U P - Cosas que corren una sola vez */
 void setup()
 {
-    // put your setup code here, to run once:
-    Serial.begin(115200);
-
+    Serial.begin( 115200 ); // inicia comunicacion serie a 115.200 baudios
     //WiFi.begin();
-    //WiFiManager - Local intialization. Once its business is done, there is no need to keep it around
-    WiFiManager wifiManager;
-    mac = WiFi.macAddress();
+    WiFiManager wifiManager; //WiFiManager - Local intialization. Once its business is done, there is no need to keep it around
+    wifiManager.setConfigPortalTimeout(180);
+    macAddress = WiFi.macAddress();
     //wifiManager.resetSettings(); //reset saved settings
-    wifiManager.autoConnect("IndoorMatic");
-    //if you get here you have connected to the WiFi
-    Serial.println("CONECTADO_WiFi");
+    wifiManager.autoConnect( "IndoorMatic" );
+    //si llega hasta acá es porque se conectó al WiFi
+    Serial.println( "[ONLINE]" );
 }
 
 void loop()
 {
   escuchaSerial();
-  if (stringCompleta)
-  {
-    stringCompleta = false;
-    analizaComando(stringDelSerial);
-  }
+  analizaComando( stringDelSerial );
 }
 
 
@@ -46,26 +51,23 @@ void loop()
 //conexion con el servidor
 void conexionServidor( char servidor[], String solicitud )
 {
-  if(debug > 0)
+  if ( client.connect( servidor, 80 ) )
   {
-    Serial.print("\n");
-    Serial.print("solicitud GET= ");
-    Serial.println(solicitud);
-  }
-  if (client.connect(servidor, 80))
-  {
-    client.println(solicitud); // envia el request http
+    //Serial.println( "[ENVIANDO_DATOS]" );
+    client.println( solicitud ); // envia el request http
     client.println("Connection: close");// cierra la conexion
     // imprime la respuesta del servidor
-    while (client.available())
+    Serial.print( "[" );
+    while ( client.available() )
     {
-      Serial.write(client.read());
+      Serial.write( client.read() );
     }
+    Serial.println( "]" );
   }
   else
   {
   // if you couldn't make a connection:
-  Serial.print("conexion_FALLIDA");
+  Serial.print( "[FALLO_CONEXION]" );
   }
 
 }
@@ -83,61 +85,56 @@ void escuchaSerial()
     stringDelSerial = Serial.readString();
     stringCompleta = true;
   }
-  if(debug > 0)
-  {
-    Serial.print("\n");
-    Serial.print("string del Serial = ");
-    Serial.println(stringDelSerial);
-  }
 }
 
 //parsea un string para ver que tipo de comando es
-void analizaComando(String comando)
+void analizaComando( String comando )
 {
-  GET = "";
   comando.trim();
-  if( comando.startsWith( "<" ) && comando.endsWith( ">" ) )
+  if ( stringCompleta )
   {
-    //datoRecibido = true;
-    comando = comando.substring( 1, comando.length() - 1);
-    GET = "GET http://www.indoormatic.com.ar/im/im.php";
-    GET += "?1a1dc91c907325c69271ddf0c944bc72&disp=";
-    GET += mac;
-    GET += comando;
-    conexionServidor(servidor, GET);
-  }
+    stringCompleta = false;
 
-  else if( comando.startsWith( "[" ) && comando.endsWith( "]" ) )
-  {
-    //comando = comando.substring( 1, comando.length() - 1) ;
-    if (comando.equals("[ESP_status]"))
+    if( comando.startsWith( "<" ) && comando.endsWith( ">" ) )
     {
-      if (WiFi.status() == 3)
-      {
-        Serial.print("CONECTADO_OK");
-        //Serial.print(WiFi.status());
-      }
-      else
-      {
-        Serial.print("CONECTADO_NO");
-      }
+      GET = "";
+      comando = comando.substring( 1, comando.length() - 1);
+      GET = "GET http://www.indoormatic.com.ar/im/im.php";
+      GET += "?1a1dc91c907325c69271ddf0c944bc72&disp=";
+      GET += macAddress;
+      GET += comando;
+      conexionServidor(servidor, GET);
     }
 
-    if (comando.equals("[ESP_mac]"))
+    else if( comando.startsWith( "[" ) && comando.endsWith( "]" ) )
     {
-        Serial.print("MacAddress: ");
-        Serial.print(WiFi.macAddress());
-    }
+      //comando = comando.substring( 1, comando.length() - 1) ;
+      if ( comando.equals( "[ESP_status]" ) )
+      {
+        if ( WiFi.status() == 3 )
+        {
+          Serial.println( "[ONLINE]" );
+          //Serial.print(WiFi.status());
+        }
+        else
+        {
+          Serial.println( "[OFFLINE]" );
+          Serial.println( "[RESET]" );
+          ESP.reset();
+        }
+      }
 
-    if (comando.equals("[ESP_reset]"))
-    {
+      else if (comando.equals( "[ESP_reset]" ))
+      {
+        Serial.println( "[RESET]" );
         ESP.reset();
+      }
     }
-  }
 
-  else
-  {
-    Serial.print("comando_error");
-    //ESP.reset();
+    else
+    {
+      Serial.print( "[comando_error]" );
+      ESP.reset();
+    }
   }
 }
