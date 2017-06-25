@@ -41,6 +41,9 @@ const char * AUTHORIZATION_HEADER = "Authorization";
 ESP8266WebServer::ESP8266WebServer(IPAddress addr, int port)
 : _server(addr, port)
 , _currentMethod(HTTP_ANY)
+, _currentVersion(0)
+, _currentStatus(HC_NONE)
+, _statusChange(0)
 , _currentHandler(0)
 , _firstHandler(0)
 , _lastHandler(0)
@@ -49,12 +52,16 @@ ESP8266WebServer::ESP8266WebServer(IPAddress addr, int port)
 , _headerKeysCount(0)
 , _currentHeaders(0)
 , _contentLength(0)
+, _chunked(false)
 {
 }
 
 ESP8266WebServer::ESP8266WebServer(int port)
 : _server(port)
 , _currentMethod(HTTP_ANY)
+, _currentVersion(0)
+, _currentStatus(HC_NONE)
+, _statusChange(0)
 , _currentHandler(0)
 , _firstHandler(0)
 , _lastHandler(0)
@@ -63,6 +70,7 @@ ESP8266WebServer::ESP8266WebServer(int port)
 , _headerKeysCount(0)
 , _currentHeaders(0)
 , _contentLength(0)
+, _chunked(false)
 {
 }
 
@@ -124,15 +132,15 @@ void ESP8266WebServer::requestAuthentication(){
   send(401);
 }
 
-void ESP8266WebServer::on(const char* uri, ESP8266WebServer::THandlerFunction handler) {
+void ESP8266WebServer::on(const String &uri, ESP8266WebServer::THandlerFunction handler) {
   on(uri, HTTP_ANY, handler);
 }
 
-void ESP8266WebServer::on(const char* uri, HTTPMethod method, ESP8266WebServer::THandlerFunction fn) {
+void ESP8266WebServer::on(const String &uri, HTTPMethod method, ESP8266WebServer::THandlerFunction fn) {
   on(uri, method, fn, _fileUploadHandler);
 }
 
-void ESP8266WebServer::on(const char* uri, HTTPMethod method, ESP8266WebServer::THandlerFunction fn, ESP8266WebServer::THandlerFunction ufn) {
+void ESP8266WebServer::on(const String &uri, HTTPMethod method, ESP8266WebServer::THandlerFunction fn, ESP8266WebServer::THandlerFunction ufn) {
   _addRequestHandler(new FunctionRequestHandler(fn, ufn, uri, method));
 }
 
@@ -193,7 +201,7 @@ void ESP8266WebServer::handleClient() {
       _currentStatus = HC_NONE;
       return;
     }
-
+    _currentClient.setTimeout(HTTP_MAX_SEND_WAIT);
     _contentLength = CONTENT_LENGTH_NOT_SET;
     _handleRequest();
 
@@ -241,9 +249,12 @@ void ESP8266WebServer::sendHeader(const String& name, const String& value, bool 
   }
 }
 
+void ESP8266WebServer::setContentLength(size_t contentLength) {
+    _contentLength = contentLength;
+}
 
 void ESP8266WebServer::_prepareHeader(String& response, int code, const char* content_type, size_t contentLength) {
-    response = "HTTP/1.1 ";
+    response = "HTTP/1."+String(_currentVersion)+" ";
     response += String(code);
     response += " ";
     response += _responseCodeToString(code);
@@ -257,9 +268,13 @@ void ESP8266WebServer::_prepareHeader(String& response, int code, const char* co
         sendHeader("Content-Length", String(contentLength));
     } else if (_contentLength != CONTENT_LENGTH_UNKNOWN) {
         sendHeader("Content-Length", String(_contentLength));
+    } else if(_contentLength == CONTENT_LENGTH_UNKNOWN && _currentVersion){ //HTTP/1.1 or above client
+      //let's do chunked
+      _chunked = true;
+      sendHeader("Accept-Ranges","none");
+      sendHeader("Transfer-Encoding","chunked");
     }
     sendHeader("Connection", "close");
-    sendHeader("Access-Control-Allow-Origin", "*");
 
     response += _responseHeaders;
     response += "\r\n";
@@ -268,10 +283,13 @@ void ESP8266WebServer::_prepareHeader(String& response, int code, const char* co
 
 void ESP8266WebServer::send(int code, const char* content_type, const String& content) {
     String header;
+    // Can we asume the following?
+    //if(code == 200 && content.length() == 0 && _contentLength == CONTENT_LENGTH_NOT_SET)
+    //  _contentLength = CONTENT_LENGTH_UNKNOWN;
     _prepareHeader(header, code, content_type, content.length());
-    sendContent(header);
-
-    sendContent(content);
+    _currentClient.write(header.c_str(), header.length());
+    if(content.length())
+      sendContent(content);
 }
 
 void ESP8266WebServer::send_P(int code, PGM_P content_type, PGM_P content) {
@@ -285,7 +303,7 @@ void ESP8266WebServer::send_P(int code, PGM_P content_type, PGM_P content) {
     char type[64];
     memccpy_P((void*)type, (PGM_VOID_P)content_type, 0, sizeof(type));
     _prepareHeader(header, code, (const char* )type, contentLength);
-    sendContent(header);
+    _currentClient.write(header.c_str(), header.length());
     sendContent_P(content);
 }
 
@@ -307,67 +325,40 @@ void ESP8266WebServer::send(int code, const String& content_type, const String& 
 }
 
 void ESP8266WebServer::sendContent(const String& content) {
-  const size_t unit_size = HTTP_DOWNLOAD_UNIT_SIZE;
-  size_t size_to_send = content.length();
-  const char* send_start = content.c_str();
-
-  while (size_to_send) {
-    size_t will_send = (size_to_send < unit_size) ? size_to_send : unit_size;
-    size_t sent = _currentClient.write(send_start, will_send);
-    if (sent == 0) {
-      break;
+  const char * footer = "\r\n";
+  size_t len = content.length();
+  if(_chunked) {
+    char * chunkSize = (char *)malloc(11);
+    if(chunkSize){
+      sprintf(chunkSize, "%x%s", len, footer);
+      _currentClient.write(chunkSize, strlen(chunkSize));
+      free(chunkSize);
     }
-    size_to_send -= sent;
-    send_start += sent;
+  }
+  _currentClient.write(content.c_str(), len);
+  if(_chunked){
+    _currentClient.write(footer, 2);
   }
 }
 
 void ESP8266WebServer::sendContent_P(PGM_P content) {
-    char contentUnit[HTTP_DOWNLOAD_UNIT_SIZE + 1];
-
-    contentUnit[HTTP_DOWNLOAD_UNIT_SIZE] = '\0';
-
-    while (content != NULL) {
-        size_t contentUnitLen;
-        PGM_P contentNext;
-
-        // due to the memccpy signature, lots of casts are needed
-        contentNext = (PGM_P)memccpy_P((void*)contentUnit, (PGM_VOID_P)content, 0, HTTP_DOWNLOAD_UNIT_SIZE);
-
-        if (contentNext == NULL) {
-            // no terminator, more data available
-            content += HTTP_DOWNLOAD_UNIT_SIZE;
-            contentUnitLen = HTTP_DOWNLOAD_UNIT_SIZE;
-        }
-        else {
-            // reached terminator. Do not send the terminator
-            contentUnitLen = contentNext - contentUnit - 1;
-            content = NULL;
-        }
-
-        // write is so overloaded, had to use the cast to get it pick the right one
-        _currentClient.write((const char*)contentUnit, contentUnitLen);
-    }
+  sendContent_P(content, strlen_P(content));
 }
 
 void ESP8266WebServer::sendContent_P(PGM_P content, size_t size) {
-    char contentUnit[HTTP_DOWNLOAD_UNIT_SIZE + 1];
-    contentUnit[HTTP_DOWNLOAD_UNIT_SIZE] = '\0';
-    size_t remaining_size = size;
-
-    while (content != NULL && remaining_size > 0) {
-        size_t contentUnitLen = HTTP_DOWNLOAD_UNIT_SIZE;
-
-        if (remaining_size < HTTP_DOWNLOAD_UNIT_SIZE) contentUnitLen = remaining_size;
-        // due to the memcpy signature, lots of casts are needed
-        memcpy_P((void*)contentUnit, (PGM_VOID_P)content, contentUnitLen);
-
-        content += contentUnitLen;
-        remaining_size -= contentUnitLen;
-
-        // write is so overloaded, had to use the cast to get it pick the right one
-        _currentClient.write((const char*)contentUnit, contentUnitLen);
+  const char * footer = "\r\n";
+  if(_chunked) {
+    char * chunkSize = (char *)malloc(11);
+    if(chunkSize){
+      sprintf(chunkSize, "%x%s", size, footer);
+      _currentClient.write(chunkSize, strlen(chunkSize));
+      free(chunkSize);
     }
+  }
+  _currentClient.write_P(content, size);
+  if(_chunked){
+    _currentClient.write(footer, 2);
+  }
 }
 
 
@@ -406,7 +397,7 @@ bool ESP8266WebServer::hasArg(String  name) {
 
 String ESP8266WebServer::header(String name) {
   for (int i = 0; i < _headerKeysCount; ++i) {
-    if (_currentHeaders[i].key == name)
+    if (_currentHeaders[i].key.equalsIgnoreCase(name))
       return _currentHeaders[i].value;
   }
   return String();
@@ -441,7 +432,7 @@ int ESP8266WebServer::headers() {
 
 bool ESP8266WebServer::hasHeader(String name) {
   for (int i = 0; i < _headerKeysCount; ++i) {
-    if ((_currentHeaders[i].key == name) &&  (_currentHeaders[i].value.length() > 0))
+    if ((_currentHeaders[i].key.equalsIgnoreCase(name)) &&  (_currentHeaders[i].value.length() > 0))
       return true;
   }
   return false;

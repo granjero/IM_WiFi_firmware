@@ -41,11 +41,10 @@ void setup()
     wifiManager.setConfigPortalTimeout(300);
     macAddress = WiFi.macAddress();
     Serial.println( macAddress );
-    // wifiManager.resetSettings(); //reset saved settings
+    wifiManager.resetSettings(); //reset saved settings
     wifiManager.autoConnect( "IndoorMatic" );
     //si llega hasta acá es porque se conectó al WiFi
     Serial.println( F( "[ONLINE]" ) );
-
 }
 
 void loop()
