@@ -21,10 +21,12 @@ String respuestaServidor            = "";
 
 unsigned long millisAhora;
 unsigned long millisUltimaConsulta  = 0; //varialble que guardará el valor de tiempo donde se leen los sensores
-unsigned long millisUltimoStatus  = 0; //varialble que guardará el valor de tiempo donde se leen los sensores
+unsigned long millisUltimoStatus    = 0; //varialble que guardará el valor de tiempo donde se leen los sensores
 
 const long intervaloConsulta        = 60000;
 const long intervaloStatus          = 120000;
+
+char contadorFallos                 = 0;
 
 boolean stringCompleta              = false;  // será true cuando llegue un comando por serial
 
@@ -38,10 +40,10 @@ void setup()
     Serial.begin( 115200 ); // inicia comunicacion serie a 115.200 baudios
     //WiFi.begin();
     WiFiManager wifiManager; //WiFiManager - Local intialization. Once its business is done, there is no need to keep it around
-    wifiManager.setConfigPortalTimeout(300);
+    wifiManager.setConfigPortalTimeout(60);
     macAddress = WiFi.macAddress();
     Serial.println( macAddress );
-    wifiManager.resetSettings(); //reset saved settings
+    // wifiManager.resetSettings(); //reset saved settings
     wifiManager.autoConnect( "IndoorMatic" );
     //si llega hasta acá es porque se conectó al WiFi
     Serial.println( F( "[ONLINE]" ) );
@@ -52,7 +54,7 @@ void loop()
   escuchaSerial();
   analizaComando( stringDelSerial );
   consultaAccion();
-  estatus();
+  estatus( 0 );
 }
 
 
@@ -73,14 +75,15 @@ void conexionServidor( char servidor[], String solicitud )
     }
     if ( respuestaServidor == "" )
     {
-      Serial.print( F( "[RESPUESTA_NULA]" ) );
+      // Serial.print( F( "[RESPUESTA_NULA]" ) );
+      respuestaServidor = "RESPUESTA_NULA";
     }
   }
   else
   {
   // if you couldn't make a connection:
-  Serial.println( F( "[FALLO_CONEXION]" ) );
-  // respuestaServidor = "NO_CONECTA_AL SERVER";
+  // Serial.println( F( "[FALLO_CONEXION]" ) );
+  respuestaServidor = "FALLO_CONEXION";
   }
 }
 
@@ -104,28 +107,66 @@ void consultaAccion()
   }
 }
 
-void estatus()
+void estatus( int forzar )
 {
   millisAhora = millis();
-  if ( millisUltimoStatus > millisAhora )
+  if ( millisUltimoStatus > millisAhora)
   {
     millisUltimoStatus  = 0;
   }
 
-  if (millisAhora - millisUltimoStatus >= intervaloStatus)
+  if ( ( millisAhora - millisUltimoStatus >= intervaloStatus ) || forzar == 1 )
   {
+    // Serial.println( F( "entro status" ) );
+    // Serial.println( WiFi.status() );
+
+    forzar = 0;
     millisUltimoStatus = millis();
-    GET = "GET http://www.indoormatic.com.ar/im/status.php";
-    conexionServidor(servidor, GET);
-    //Serial.println( respuestaServidor );
-    if ( respuestaServidor != "[INDOORMATIC]" && respuestaServidor != "")
+
+    if ( WiFi.status() == 3 )
     {
+      // Serial.println( F( "entro wifi = 3" ) );
+
+      GET = "GET http://www.indoormatic.com.ar/im/status.php";
+      conexionServidor(servidor, GET);
+      //Serial.println( respuestaServidor ;
+      if ( respuestaServidor == "[ONLINE]" )
+      {
+        Serial.println( F( "[ONLINE]" ) );
+      }
+
+      else if ( respuestaServidor == "RESPUESTA_NULA" )
+      {
+        Serial.println( F( "[RESPUESTA_NULA]" ) );
+      }
+
+      else if ( respuestaServidor == "FALLO_CONEXION" )
+      {
+        Serial.println( F( "[FALLO_CONEXION]" ) );
+        contadorFallos++;
+        if (contadorFallos > 10)
+        {
+          ESP.reset();
+          contadorFallos = 0;
+        }
+      }
+
+      // else if ( respuestaServidor != "[ONLINE]" && respuestaServidor != "" )
+      else
+      {
+        Serial.println( F( "[OFFLINE]" ) );
+        // delay(1000);
+      }
+    }
+
+    else
+    {
+      Serial.println( F( "[RESET]" ) );
+      delay(1000);
       Serial.println( F( "[OFFLINE]" ) );
       delay(1000);
       ESP.reset();
     }
-    else
-    Serial.println( F( "[ONLINE]" ) );
   }
 }
 
@@ -154,7 +195,7 @@ void analizaComando( String comando )
     if( comando.startsWith( "<" ) && comando.endsWith( ">" ) )
     {
       GET = "";
-      comando = comando.substring( 1, comando.length() - 1);
+      comando = comando.substring( 1, comando.length() - 1 );
       GET = "GET http://www.indoormatic.com.ar/im/im.php";
       GET += "?1a1dc91c907325c69271ddf0c944bc72&disp=";
       GET += macAddress;
@@ -171,49 +212,54 @@ void analizaComando( String comando )
       //comando = comando.substring( 1, comando.length() - 1) ;
       if ( comando.equals( "[ESP_status]" ) )
       {
-        if ( WiFi.status() == 3 )
-        {
-          Serial.println( F( "[ONLINE]" ) );
-          //Serial.print(WiFi.status());
-        }
-        else
-        {
-          Serial.println( F( "[OFFLINE]" ) );
-          delay(1000);
-          //Serial.println( "[RESET]" );
-          //ESP.reset();
-        }
+        // Serial.println( F( "entro conamdo" ) );
+        estatus( 1 );
+        // if ( WiFi.status() == 3 )
+        // {
+        //   Serial.println( F( "[ONLINE]" ) );
+        //   //Serial.print(WiFi.status());
+        // }
+        // else
+        // {
+        //   Serial.println( F( "[OFFLINE]" ) );
+        //   delay(1000);
+        //   //Serial.println( "[RESET]" );
+        //   //ESP.reset();
+        // }
       }
-
+      /*
       else if (comando.equals( "[ESP_reset]" ))
       {
         Serial.println( F( "[RESET]" ) );
         ESP.reset();
       }
+      */
 
+      /*
       else if (comando.equals( "[CONSULTA]" ))
       {
         consultaAccion();
       }
+      */
 
+      /*
       else if (comando.equals( "[CONN_status]" ))
       {
         estatus();
       }
-
-      if ( comando.equals( "[REGADO]" ) )
+      */
+      if ( comando.equals( "[REGANDO]" ) )
       {
         GET = "GET http://www.indoormatic.com.ar/im/ordenes.php";
         GET += "?disp=";
         GET += macAddress;
         GET += "&regado=1";
       }
-
     }
 
     else
     {
-      Serial.print( F( "[comando_error]" ) );
+      // Serial.print( F( "[comando_error]" ) );
       //ESP.reset();
     }
   }
